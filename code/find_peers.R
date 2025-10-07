@@ -111,24 +111,34 @@ acs_ranked <- acs_wide %>%
     )
   )
 
-# Calculate cosine similarity and joint rank for percentage indicators
-pct_cols <- indicator_cols[grepl("_pct$", indicator_cols)]
-maryland_pct_vector <- maryland_data %>%
-  select(all_of(pct_cols)) %>%
-  as.numeric()
+# Create a matrix of just the indicator columns for scaling
+indicator_matrix <- acs_wide %>%
+  select(all_of(indicator_cols)) %>%
+  as.matrix()
+
+# Apply the scale() function
+scaled_indicator_matrix <- scale(indicator_matrix)
+
+# Find the row index for Maryland to get its scaled data vector
+md_index <- which(acs_wide$NAME == "Maryland")
+maryland_scaled_vector <- scaled_indicator_matrix[md_index, ]
+
+# Cosine similarity function
 cosine_similarity <- function(v1, v2) {
-  sum(v1 * v2) / (sqrt(sum(v1^2)) * sqrt(sum(v2^2)))
+  sum(v1 * v2, na.rm = TRUE) / (sqrt(sum(v1^2, na.rm = TRUE)) * sqrt(sum(v2^2, na.rm = TRUE)))
 }
 
+# Apply the function to every row of the scaled matrix, comparing it to Maryland's vector
+cosine_similarities <- apply(scaled_indicator_matrix, 1, function(row) {
+  cosine_similarity(row, maryland_scaled_vector)
+})
+
+# Add the calculated similarities and the joint rank to the main dataframe
 acs_final <- acs_ranked %>%
-  rowwise() %>%
-  mutate(
-    cosine_sim_md = cosine_similarity(c_across(all_of(pct_cols)), maryland_pct_vector)
-  ) %>%
-  ungroup() %>%
+  mutate(cosine_sim_md = cosine_similarities) %>%
   mutate(
     # Rank by descending similarity score (most similar gets rank 1)
-    pct_joint_rank_md = rank(desc(cosine_sim_md), ties.method = "min")
+    joint_rank_md = rank(desc(cosine_sim_md), ties.method = "min")
   )
 
 final_col_order <- c(
@@ -136,7 +146,7 @@ final_col_order <- c(
   unlist(lapply(indicator_cols, function(col_name) {
     c(col_name, paste0(col_name, "_diff_md"), paste0(col_name, "_diff_md_rank"))
   })),
-  "cosine_sim_md", "pct_joint_rank_md"
+  "cosine_sim_md", "joint_rank_md"
 )
 
 acs_final <- acs_final %>%
